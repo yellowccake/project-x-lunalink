@@ -1,61 +1,28 @@
 ﻿# Project X LunaLink - TT&C Simulator
 
-This project follows the **TT&C option** from `ProjectX_LunaLink_Brief_v2.pdf`.
+## About
 
-TT&C means **Telemetry, Tracking, and Command**. The app is now a minimalist step-by-step wizard: the user enters assumptions page by page, runs the simulation, then views the outputs and graphs.
+This is a small university project for Spacecraft Design Fundamentals. It focuses on the TT&C subsystem of the Project X LunaLink mission and turns the communication analysis into a simple Python GUI.
 
-## Run
+The GUI is built with Tkinter and was developed with help from OpenAI Codex. The app lets the user adjust communication parameters, run a simplified simulation, and inspect the results through plots and summary values.
 
-```powershell
-cd C:\Users\Negar\Desktop\TUM_1st_sem\Spacecraft_Design_Fundamentals\project_x
+## Install and Run
+
+Requirements:
+
+- Python 3
+- Tkinter, included with the standard Python installation on Windows/macOS
+
+No external Python packages are needed, so there is no `pip install` step.
+
+Run the app from the project folder:
+
+```bash
 python app.py
 ```
 
-## Files
+## What It Shows
 
-- `app.py` - Minimal dark-themed Tkinter GUI wizard.
-- `orbit_model.py` - Simplified two-body Molniya orbit and Ottobrunn ground-station visibility.
-- `link_budget.py` - Free-space RF link budget equations.
-- `ttc_model.py` - Mission simulation combining orbit, contact windows, link margin, and data volume.
+The adjustable inputs include transmitter power, antenna gains, data rate, system losses, minimum elevation, required link margin, and onboard data storage.
 
-## Wizard Flow
-
-1. **Welcome** - introduces the TT&C simulator.
-2. **Mission** - shows fixed values from the PDF brief.
-3. **Earth Link** - user chooses transmitter power, antenna gains, losses, data rate, Eb/N0, elevation, and required margin.
-4. **Moon Relay** - user enables/disables the simplified Moon relay and chooses relay link assumptions.
-5. **Data** - user chooses data generation rate, storage capacity, and initial stored data.
-6. **Review** - user checks assumptions and starts the simulation.
-7. **Results** - app shows ground track, contact windows, link margin, data storage, and summary metrics.
-
-## What the PDF asks for in TT&C
-
-The brief says the TT&C subsystem should:
-
-- assume gains, losses, and antenna position
-- define a link budget for Earth and Moon communication links
-- simulate contact windows and data volume
-- show ground track and communication windows
-- provide a GUI where parameters are adjustable and plots update
-
-## Fixed Mission Values
-
-- Orbit: 500 x 36,000 km Molniya-type HEO
-- Inclination: 63.4 deg
-- Spacecraft mass: 500 kg
-- Ground station: Ottobrunn, Germany, 48.07 N, 11.65 E
-- Minimum elevation: adjustable, default 5 deg
-- Simulation duration: 3 orbits
-
-## Simplifications
-
-- Two-body Keplerian orbit, no perturbations
-- Spherical Earth visibility model
-- Earth downlink uses X-band, default 8450 MHz
-- Moon relay uses a simplified UHF link and is assumed available near apogee
-- Link margin is based on free-space path loss and Eb/N0
-- Data storage increases continuously and decreases during valid communication windows
-
-## Report Notes
-
-Useful wording for the report: the GUI separates user inputs from the calculation backend. The backend propagates the spacecraft orbit, checks ground-station visibility, evaluates the RF link budget, and integrates generated/downlinked data over three orbits.
+The outputs include the ground track, communication windows, link margin, stored data, and downlinked data.
