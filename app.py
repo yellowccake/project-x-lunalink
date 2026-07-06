@@ -192,6 +192,16 @@ class Knob(tk.Canvas):
             font=(FONT, 11 if major else 10, "bold" if major else "normal"),
         )
 
+    def value_text_color(self) -> str:
+        value = self.variable.get()
+        if value < self.low or value > self.high:
+            return COLORS["red"]
+        frac = (value - self.low) / max(0.001, self.high - self.low)
+        # SC UHF RX = 20 dBi is aggressive but still allowed, so design-limit values use amber instead of red.
+        if frac <= 0.05 or frac >= 0.95:
+            return COLORS["yellow"]
+        return COLORS["text"]
+
     def draw(self) -> None:
         self.delete("all")
         cx, cy, r = self.cx, self.cy, self.radius
@@ -222,7 +232,7 @@ class Knob(tk.Canvas):
         rad = math.radians(self.start_deg + active)
         self.create_line(cx, cy, cx + math.cos(rad) * 29, cy - math.sin(rad) * 29, fill=COLORS["text"], width=3)
         rounded_rect(self, cx - 32, 164, cx + 32, 188, 5, fill=COLORS["panel2"], outline=COLORS["line_dim"], width=1)
-        value_color = COLORS["red"] if self.variable.get() >= self.high or self.variable.get() <= self.low else COLORS["text"]
+        value_color = self.value_text_color()
         self.create_text(cx, 176, text=self.format_value(), fill=value_color, font=(FONT, 12, "bold"))
 class LinePlot(tk.Canvas):
     def __init__(self, master: tk.Misc, title: str, y_label: str, height: int = 230) -> None:
