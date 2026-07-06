@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -284,11 +285,19 @@ class LinePlot(tk.Canvas):
                 segment.extend([x, y])
             if len(segment) >= 4:
                 self.create_line(*segment, fill=color, width=4)
-        lx = left + pw - 154
-        for i, (_x, _y, color, label) in enumerate(self.series):
-            y = 20 + i * 18
-            self.create_line(lx, y, lx + 20, y, fill=color, width=4)
-            self.create_text(lx + 26, y, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 12))
+        if self.title == "Onboard Data":
+            lx = left + 116
+            ly = 20
+            for _x, _y, color, label in self.series:
+                self.create_line(lx, ly, lx + 18, ly, fill=color, width=4)
+                self.create_text(lx + 23, ly, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 11, "bold"))
+                lx += 96
+        else:
+            lx = left + pw - 168
+            for i, (_x, _y, color, label) in enumerate(self.series):
+                y = 20 + i * 17
+                self.create_line(lx, y, lx + 18, y, fill=color, width=4)
+                self.create_text(lx + 24, y, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 11, "bold"))
         self.create_text(left + pw / 2, h - 14, text="Time [h]", fill=COLORS["text"], font=(FONT, 13))
         self.create_text(16, top + ph / 2, text=self.y_label, angle=90, fill=COLORS["text"], font=(FONT, 13))
 
@@ -309,6 +318,21 @@ class GroundTrack(tk.Canvas):
     def xy(self, lat: float, lon: float, left: int, top: int, pw: int, ph: int) -> tuple[float, float]:
         return left + (lon + 180.0) / 360.0 * pw, top + (90.0 - lat) / 180.0 * ph
 
+    def draw_world_background(self, left: int, top: int, pw: int, ph: int) -> None:
+        land = [
+            [(-168, 15), (-140, 55), (-102, 70), (-55, 52), (-82, 20), (-105, 8), (-125, 25)],
+            [(-82, 12), (-48, 10), (-36, -18), (-58, -55), (-76, -35)],
+            [(-18, 35), (8, 60), (42, 58), (62, 42), (42, 18), (10, 4), (-12, 12)],
+            [(34, 30), (52, 10), (44, -35), (20, -35), (8, 4)],
+            [(45, 5), (88, 30), (126, 48), (155, 22), (118, -8), (72, -4)],
+            [(110, -10), (154, -12), (152, -42), (116, -40)],
+            [(-52, 60), (-24, 72), (20, 70), (36, 62), (6, 55)],
+        ]
+        for poly in land:
+            points: list[float] = []
+            for lon, lat in poly:
+                points.extend(self.xy(lat, lon, left, top, pw, ph))
+            self.create_polygon(*points, fill=COLORS["panel2"], outline=COLORS["line_dim"], width=1, smooth=True)
     def draw(self) -> None:
         self.delete("all")
         w, h = max(self.winfo_width(), 420), max(self.winfo_height(), 240)
@@ -316,6 +340,7 @@ class GroundTrack(tk.Canvas):
         left, top, right, bottom = 58, 42, 18, 40
         pw, ph = w - left - right, h - top - bottom
         self.create_text(left, 18, text="Ground Track", anchor="w", fill=COLORS["text"], font=(FONT, 17, "bold"))
+        self.draw_world_background(left, top, pw, ph)
         for lon in range(-180, 181, 60):
             x, _ = self.xy(0, lon, left, top, pw, ph)
             self.create_line(x, top, x, top + ph, fill=COLORS["line_dim"])
@@ -362,9 +387,11 @@ class GroundTrack(tk.Canvas):
 
 class Orbit3DView(tk.Canvas):
     def __init__(self, master: tk.Misc) -> None:
-        super().__init__(master, height=280, bg=COLORS["panel"], highlightthickness=0)
+        super().__init__(master, height=300, bg=COLORS["panel"], highlightthickness=0)
         self.orbit = OrbitConfig()
         self.gs = GroundStation()
+        self.view_elev = math.radians(25.0)
+        self.view_az = math.radians(45.0)
         self.bind("<Configure>", lambda _event: self.draw())
 
     def set_data(self, orbit: OrbitConfig, gs: GroundStation) -> None:
@@ -374,50 +401,79 @@ class Orbit3DView(tk.Canvas):
 
     def project(self, vec: tuple[float, float, float], cx: float, cy: float, scale: float) -> tuple[float, float]:
         x, y, z = vec
-        xp = 0.66 * (x - y)
-        yp = 0.34 * (x + y) - 0.78 * z
+        ca, sa = math.cos(self.view_az), math.sin(self.view_az)
+        ce, se = math.cos(self.view_elev), math.sin(self.view_elev)
+        xr = ca * x - sa * y
+        yr = sa * x + ca * y
+        xp = xr
+        yp = se * yr - ce * z
         return cx + xp * scale, cy + yp * scale
 
     def draw_axis(self, cx: float, cy: float, scale: float, label: str, vec: tuple[float, float, float]) -> None:
         x, y = self.project(vec, cx, cy, scale)
         self.create_line(cx, cy, x, y, fill=COLORS["line"], width=2)
-        self.create_text(x, y, text=label, fill=COLORS["text"], font=(FONT, 12, "bold"), anchor="w")
+        self.create_text(x + 4, y, text=label, fill=COLORS["text"], font=(FONT, 12, "bold"), anchor="w")
+
+    def draw_polyline_3d(self, vectors: list[tuple[float, float, float]], cx: float, cy: float, scale: float, color: str, width: int = 1) -> None:
+        points: list[float] = []
+        for vec in vectors:
+            points.extend(self.project(vec, cx, cy, scale))
+        if len(points) >= 4:
+            self.create_line(*points, fill=color, width=width, smooth=True)
+
+    def draw_earth_grid(self, cx: float, cy: float, scale: float) -> None:
+        r = EARTH_RADIUS_KM
+        self.create_oval(cx - r * scale, cy - r * scale, cx + r * scale, cy + r * scale, fill="#9ed0e6", outline=COLORS["line"], width=2)
+        for lat_deg in (-60, -30, 0, 30, 60):
+            lat = math.radians(lat_deg)
+            vectors = []
+            for lon_deg in range(0, 361, 8):
+                lon = math.radians(lon_deg)
+                vectors.append((r * math.cos(lat) * math.cos(lon), r * math.cos(lat) * math.sin(lon), r * math.sin(lat)))
+            self.draw_polyline_3d(vectors, cx, cy, scale, "#5b9fba", 1)
+        for lon_deg in range(0, 180, 30):
+            lon = math.radians(lon_deg)
+            vectors = []
+            for lat_deg in range(-90, 91, 5):
+                lat = math.radians(lat_deg)
+                vectors.append((r * math.cos(lat) * math.cos(lon), r * math.cos(lat) * math.sin(lon), r * math.sin(lat)))
+            self.draw_polyline_3d(vectors, cx, cy, scale, "#5b9fba", 1)
+
+    def draw_marker(self, vec: tuple[float, float, float], cx: float, cy: float, scale: float, color: str, label: str, r: int = 5) -> None:
+        x, y = self.project(vec, cx, cy, scale)
+        self.create_oval(x - r, y - r, x + r, y + r, fill=color, outline=COLORS["line"], width=1)
+        self.create_text(x + r + 5, y, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 11, "bold"))
+
+    def draw_legend(self, w: int) -> None:
+        items = [(COLORS["accent"], "Orbit"), (COLORS["red"], "Spacecraft"), (COLORS["green"], "Perigee"), (COLORS["purple"], "Apogee"), (COLORS["accent"], "Ottobrunn")]
+        x = max(22, w - 365)
+        y = 24
+        for color, label in items:
+            self.create_line(x, y, x + 18, y, fill=color, width=4)
+            self.create_text(x + 24, y, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 10, "bold"))
+            x += 72
 
     def draw(self) -> None:
         self.delete("all")
-        w, h = max(self.winfo_width(), 420), max(self.winfo_height(), 250)
+        w, h = max(self.winfo_width(), 440), max(self.winfo_height(), 280)
         rounded_rect(self, 1, 1, w - 2, h - 2, PANEL_RADIUS, fill=COLORS["panel"], outline=COLORS["line"], width=1)
         self.create_text(22, 22, text="3D Orbit View", anchor="w", fill=COLORS["text"], font=(FONT, 17, "bold"))
-        cx, cy = w * 0.50, h * 0.56
+        self.draw_legend(w)
+        cx, cy = w * 0.50, h * 0.57
         ra = EARTH_RADIUS_KM + self.orbit.apogee_alt_km
-        scale = min((w - 80) / (2.1 * ra), (h - 70) / (1.55 * ra))
+        scale = min((w - 70) / (2.0 * ra), (h - 58) / (1.34 * ra))
 
-        self.draw_axis(cx, cy, scale, "X [km]", (ra * 0.55, 0.0, 0.0))
-        self.draw_axis(cx, cy, scale, "Y [km]", (0.0, ra * 0.55, 0.0))
-        self.draw_axis(cx, cy, scale, "Z [km]", (0.0, 0.0, ra * 0.45))
+        self.draw_axis(cx, cy, scale, "X [km]", (ra * 0.48, 0.0, 0.0))
+        self.draw_axis(cx, cy, scale, "Y [km]", (0.0, ra * 0.48, 0.0))
+        self.draw_axis(cx, cy, scale, "Z [km]", (0.0, 0.0, ra * 0.42))
+        self.draw_earth_grid(cx, cy, scale)
 
-        earth_r = max(8.0, EARTH_RADIUS_KM * scale * 0.80)
-        self.create_oval(cx - earth_r, cy - earth_r, cx + earth_r, cy + earth_r, fill="#d6c1a7", outline=COLORS["line"], width=2)
-        self.create_text(cx, cy, text="Earth", fill=COLORS["text"], font=(FONT, 11, "bold"))
-
-        points: list[float] = []
-        samples = 260
-        for i in range(samples + 1):
-            t_s = self.orbit.period_s * i / samples
-            points.extend(self.project(spacecraft_eci(t_s, self.orbit), cx, cy, scale))
-        if len(points) >= 4:
-            self.create_line(*points, fill=COLORS["accent"], width=3, smooth=True)
-
-        perigee = spacecraft_eci(0.0, self.orbit)
-        apogee = spacecraft_eci(self.orbit.period_s / 2.0, self.orbit)
-        for label, vec, color in (("Perigee", perigee, COLORS["red"]), ("Apogee", apogee, COLORS["purple"])):
-            x, y = self.project(vec, cx, cy, scale)
-            self.create_oval(x - 5, y - 5, x + 5, y + 5, fill=color, outline=COLORS["line"])
-            self.create_text(x + 8, y, text=label, anchor="w", fill=COLORS["text"], font=(FONT, 11, "bold"))
-
-        gx, gy = self.project(ground_station_ecef(self.gs), cx, cy, scale)
-        self.create_oval(gx - 5, gy - 5, gx + 5, gy + 5, fill=COLORS["green"], outline=COLORS["line"], width=2)
-        self.create_text(gx + 8, gy, text="Ottobrunn", anchor="w", fill=COLORS["text"], font=(FONT, 11, "bold"))
+        orbit_vectors = [spacecraft_eci(self.orbit.period_s * i / 320, self.orbit) for i in range(321)]
+        self.draw_polyline_3d(orbit_vectors, cx, cy, scale, COLORS["accent"], 4)
+        self.draw_marker(spacecraft_eci(0.18 * self.orbit.period_s, self.orbit), cx, cy, scale, COLORS["red"], "SC", 6)
+        self.draw_marker(spacecraft_eci(0.0, self.orbit), cx, cy, scale, COLORS["green"], "Perigee", 5)
+        self.draw_marker(spacecraft_eci(self.orbit.period_s / 2.0, self.orbit), cx, cy, scale, COLORS["purple"], "Apogee", 5)
+        self.draw_marker(ground_station_ecef(self.gs), cx, cy, scale, COLORS["accent"], "Ottobrunn", 5)
 
 class Timeline(tk.Canvas):
     def __init__(self, master: tk.Misc) -> None:
@@ -519,6 +575,8 @@ class DashboardApp(tk.Frame):
         self.pack(fill="both", expand=True)
         self.page = "intro"
         self.update_job: str | None = None
+        image_path = Path(__file__).with_name("luna_for_gui.png")
+        self.hero_image = tk.PhotoImage(file=str(image_path)) if image_path.exists() else None
 
         self.tx_power = tk.DoubleVar(value=50.0)
         self.tx_gain = tk.DoubleVar(value=35.0)
@@ -600,18 +658,23 @@ class DashboardApp(tk.Frame):
         c.delete("all")
         w, h = max(c.winfo_width(), 720), max(c.winfo_height(), 650)
         rounded_rect(c, 1, 1, w - 2, h - 2, PANEL_RADIUS, fill=COLORS["panel"], outline=COLORS["line"])
-        c.create_text(w / 2, 58, text="Project X LunaLink", anchor="center", fill=COLORS["text"], font=(FONT, 38, "bold"))
-        c.create_text(w / 2, 96, text="TT&C live simulation dashboard", anchor="center", fill=COLORS["text"], font=(FONT, 19, "bold"))
+        c.create_text(w / 2, 48, text="Project X LunaLink", anchor="center", fill=COLORS["text"], font=(FONT, 38, "bold"))
+        c.create_text(w / 2, 84, text="TT&C mission simulation dashboard", anchor="center", fill=COLORS["text"], font=(FONT, 18, "bold"))
 
-        cx, cy = w * 0.50, 255
-        c.create_oval(cx - 230, cy - 150, cx + 230, cy + 150, outline="#c3a485", width=2)
-        c.create_arc(cx - 290, cy - 175, cx + 300, cy + 165, start=198, extent=145, style="arc", outline="#8a684b", width=3)
-        c.create_rectangle(cx - 62, cy - 46, cx + 62, cy + 46, fill="#c9ad8c", outline=COLORS["line"], width=2)
-        c.create_line(cx - 135, cy, cx - 62, cy, fill=COLORS["line"], width=3)
-        c.create_line(cx + 62, cy, cx + 135, cy, fill=COLORS["line"], width=3)
-        c.create_rectangle(cx - 255, cy - 58, cx - 135, cy + 58, fill="#b8926e", outline=COLORS["line"], width=2)
-        c.create_rectangle(cx + 135, cy - 58, cx + 255, cy + 58, fill="#b8926e", outline=COLORS["line"], width=2)
-        c.create_oval(cx - 28, cy - 28, cx + 28, cy + 28, outline=COLORS["accent"], width=3)
+        hero_y = 255
+        if self.hero_image is not None:
+            c.create_image(w / 2, hero_y, image=self.hero_image, anchor="center")
+            rounded_rect(c, w / 2 - 220, hero_y - 166, w / 2 + 220, hero_y + 166, 22, outline=COLORS["line"], width=2)
+        else:
+            cx, cy = w * 0.50, hero_y
+            c.create_oval(cx - 230, cy - 150, cx + 230, cy + 150, outline="#c3a485", width=2)
+            c.create_arc(cx - 290, cy - 175, cx + 300, cy + 165, start=198, extent=145, style="arc", outline="#8a684b", width=3)
+            c.create_rectangle(cx - 62, cy - 46, cx + 62, cy + 46, fill="#c9ad8c", outline=COLORS["line"], width=2)
+            c.create_line(cx - 135, cy, cx - 62, cy, fill=COLORS["line"], width=3)
+            c.create_line(cx + 62, cy, cx + 135, cy, fill=COLORS["line"], width=3)
+            c.create_rectangle(cx - 255, cy - 58, cx - 135, cy + 58, fill="#b8926e", outline=COLORS["line"], width=2)
+            c.create_rectangle(cx + 135, cy - 58, cx + 255, cy + 58, fill="#b8926e", outline=COLORS["line"], width=2)
+            c.create_oval(cx - 28, cy - 28, cx + 28, cy + 28, outline=COLORS["accent"], width=3)
 
         sections = [
             ("Mission", "Molniya orbit, 500 kg spacecraft, Earth X-band, Moon UHF."),
@@ -622,15 +685,15 @@ class DashboardApp(tk.Frame):
         start_x = (w - (3 * box_w + 32)) / 2
         for i, (title, body) in enumerate(sections):
             x = start_x + i * (box_w + 16)
-            rounded_rect(c, x, 405, x + box_w, 493, 16, fill=COLORS["panel2"], outline=COLORS["line"])
-            c.create_text(x + 18, 428, text=title, anchor="w", fill=COLORS["text"], font=(FONT, 15, "bold"))
-            c.create_text(x + 18, 456, text="- " + body, anchor="nw", fill=COLORS["text"], font=(FONT, 12), width=box_w - 34)
+            rounded_rect(c, x, 435, x + box_w, 514, 16, fill=COLORS["panel2"], outline=COLORS["line"])
+            c.create_text(x + 18, 458, text=title, anchor="w", fill=COLORS["text"], font=(FONT, 15, "bold"))
+            c.create_text(x + 18, 482, text=body, anchor="nw", fill=COLORS["text"], font=(FONT, 12), width=box_w - 34)
 
-        run_x, run_y, run_r = w / 2, 570, 50
+        run_x, run_y, run_r = w / 2, 585, 48
         c.create_oval(run_x - run_r, run_y - run_r, run_x + run_r, run_y + run_r, fill="#b69a78", outline=COLORS["text"], width=2, tags=("intro_run",))
         c.create_oval(run_x - run_r + 8, run_y - run_r + 8, run_x + run_r - 8, run_y + run_r - 8, fill="#ead7bf", outline="#5d4632", width=1, tags=("intro_run",))
         c.create_polygon(run_x - 12, run_y - 22, run_x - 12, run_y + 22, run_x + 25, run_y, fill=COLORS["text"], outline="", tags=("intro_run",))
-        c.create_text(run_x, run_y + 74, text="RUN", fill=COLORS["text"], font=(FONT, 18, "bold"), tags=("intro_run",))
+        c.create_text(run_x, run_y + 66, text="RUN", fill=COLORS["text"], font=(FONT, 18, "bold"), tags=("intro_run",))
         c.tag_bind("intro_run", "<Button-1>", lambda _event: self.show_dashboard())
         c.tag_bind("intro_run", "<Enter>", lambda _event: c.configure(cursor="hand2"))
         c.tag_bind("intro_run", "<Leave>", lambda _event: c.configure(cursor=""))
@@ -848,6 +911,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 
