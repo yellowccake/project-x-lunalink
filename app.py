@@ -336,47 +336,70 @@ class GroundTrack(tk.Canvas):
         self.lats, self.lons, self.contact, self.gs = lats, lons, contact, gs
         self.draw()
 
+    def wrap_lon(self, lon: float) -> float:
+        wrapped = ((lon + 180.0) % 360.0) - 180.0
+        if math.isclose(wrapped, -180.0) and lon > 0.0:
+            return 180.0
+        return wrapped
+
     def xy(self, lat: float, lon: float, left: int, top: int, pw: int, ph: int) -> tuple[float, float]:
+        lon = self.wrap_lon(lon)
         return left + (lon + 180.0) / 360.0 * pw, top + (90.0 - lat) / 180.0 * ph
 
-    def ground_track_segments(self) -> list[list[int]]:
-        segments: list[list[int]] = []
-        current: list[int] = []
-        for i, lon in enumerate(self.lons):
-            if i > 0 and abs(lon - self.lons[i - 1]) > 180.0:
-                if len(current) >= 2:
-                    segments.append(current)
-                current = []
-            current.append(i)
-        if len(current) >= 2:
-            segments.append(current)
-        return segments
-
-    def draw_polyline(self, indices: list[int], left: int, top: int, pw: int, ph: int, color: str, width: int) -> None:
-        points: list[float] = []
-        for i in indices:
-            points.extend(self.xy(self.lats[i], self.lons[i], left, top, pw, ph))
-        if len(points) >= 4:
-            self.create_line(*points, fill=color, width=width, smooth=True)
-
-    def draw_contact_overlay(self, segments: list[list[int]], left: int, top: int, pw: int, ph: int) -> None:
-        for segment in segments:
-            active: list[int] = []
-            for i in segment:
-                if self.contact[i]:
-                    active.append(i)
+    def build_wrapped_segments(self, points: list[tuple[float, float]]) -> tuple[list[list[tuple[float, float]]], int]:
+        if len(points) < 2:
+            return [], 0
+        segments: list[list[tuple[float, float]]] = [[(points[0][0], self.wrap_lon(points[0][1]))]]
+        crossings = 0
+        for lat2_raw, lon2_raw in points[1:]:
+            lat1, lon1 = segments[-1][-1]
+            lon2 = self.wrap_lon(lon2_raw)
+            delta = lon2 - lon1
+            if abs(delta) > 180.0:
+                crossings += 1
+                if delta < 0.0:
+                    boundary_from, boundary_to = 180.0, -180.0
+                    lon2_unwrapped = lon2 + 360.0
                 else:
-                    if len(active) >= 2:
-                        self.draw_polyline(active, left, top, pw, ph, COLORS["accent"], 4)
-                    elif len(active) == 1:
-                        x, y = self.xy(self.lats[active[0]], self.lons[active[0]], left, top, pw, ph)
-                        self.create_oval(x - 2, y - 2, x + 2, y + 2, fill=COLORS["accent"], outline="")
-                    active = []
-            if len(active) >= 2:
-                self.draw_polyline(active, left, top, pw, ph, COLORS["accent"], 4)
-            elif len(active) == 1:
-                x, y = self.xy(self.lats[active[0]], self.lons[active[0]], left, top, pw, ph)
-                self.create_oval(x - 2, y - 2, x + 2, y + 2, fill=COLORS["accent"], outline="")
+                    boundary_from, boundary_to = -180.0, 180.0
+                    lon2_unwrapped = lon2 - 360.0
+                span = lon2_unwrapped - lon1
+                frac = 0.0 if math.isclose(span, 0.0) else (boundary_from - lon1) / span
+                frac = max(0.0, min(1.0, frac))
+                lat_cross = lat1 + frac * (lat2_raw - lat1)
+                segments[-1].append((lat_cross, boundary_from))
+                segments.append([(lat_cross, boundary_to), (lat2_raw, lon2)])
+            else:
+                segments[-1].append((lat2_raw, lon2))
+        return [segment for segment in segments if len(segment) >= 2], crossings
+
+    def contact_runs(self) -> list[list[tuple[float, float]]]:
+        runs: list[list[tuple[float, float]]] = []
+        current: list[tuple[float, float]] = []
+        for lat, lon, active in zip(self.lats, self.lons, self.contact):
+            if active:
+                current.append((lat, lon))
+            else:
+                if len(current) >= 2:
+                    runs.append(current)
+                current = []
+        if len(current) >= 2:
+            runs.append(current)
+        return runs
+
+    def draw_segment(self, segment: list[tuple[float, float]], left: int, top: int, pw: int, ph: int, color: str, width: int) -> None:
+        points: list[float] = []
+        for lat, lon in segment:
+            points.extend(self.xy(lat, lon, left, top, pw, ph))
+        if len(points) >= 4:
+            self.create_line(*points, fill=color, width=width, smooth=False)
+
+    def print_debug(self, raw_points: int, segments: list[list[tuple[float, float]]], crossings: int) -> None:
+        print(f"GroundTrack debug: raw_points={raw_points}, drawing_segments={len(segments)}, dateline_crossings={crossings}")
+        for idx, segment in enumerate(segments, start=1):
+            first_lat, first_lon = segment[0]
+            last_lat, last_lon = segment[-1]
+            print(f"  segment {idx}: first=({first_lat:.2f}, {first_lon:.2f}), last=({last_lat:.2f}, {last_lon:.2f})")
 
     def draw(self) -> None:
         self.delete("all")
@@ -388,21 +411,31 @@ class GroundTrack(tk.Canvas):
         for lon in range(-180, 181, 60):
             x, _ = self.xy(0, lon, left, top, pw, ph)
             self.create_line(x, top, x, top + ph, fill=COLORS["line_dim"])
-            self.create_text(x, top + ph + 18, text=str(lon), fill=COLORS["text"], font=(FONT, 12))
+            anchor = "w" if lon == -180 else "e" if lon == 180 else "center"
+            self.create_text(x, top + ph + 18, text=str(lon), anchor=anchor, fill=COLORS["text"], font=(FONT, 12))
         for lat in range(-90, 91, 30):
             _, y = self.xy(lat, 0, left, top, pw, ph)
             self.create_line(left, y, left + pw, y, fill=COLORS["line_dim"])
             self.create_text(left - 10, y, text=str(lat), anchor="e", fill=COLORS["text"], font=(FONT, 12))
-        segments = self.ground_track_segments()
+
+        raw_points = list(zip(self.lats, self.lons))
+        segments, crossings = self.build_wrapped_segments(raw_points)
         for segment in segments:
-            self.draw_polyline(segment, left, top, pw, ph, COLORS["gray"], 2)
-        self.draw_contact_overlay(segments, left, top, pw, ph)
+            self.draw_segment(segment, left, top, pw, ph, COLORS["gray"], 3)
+        for run in self.contact_runs():
+            contact_segments, _run_crossings = self.build_wrapped_segments(run)
+            for segment in contact_segments:
+                self.draw_segment(segment, left, top, pw, ph, COLORS["accent"], 2)
+
         gx, gy = self.xy(self.gs.lat_deg, self.gs.lon_deg, left, top, pw, ph)
         self.create_oval(gx - 7, gy - 7, gx + 7, gy + 7, fill=COLORS["accent"], outline=COLORS["line"], width=2)
         rounded_rect(self, gx + 10, gy - 13, gx + 120, gy + 13, 7, fill=COLORS["panel2"], outline=COLORS["line_dim"])
         self.create_text(gx + 18, gy, text="Ottobrunn GS", anchor="w", fill=COLORS["text"], font=(FONT, 12, "bold"))
         self.create_text(left + pw / 2, h - 14, text="Longitude [deg]", fill=COLORS["text"], font=(FONT, 13))
         self.create_text(18, top + ph / 2, text="Latitude [deg]", angle=90, fill=COLORS["text"], font=(FONT, 13))
+        self.print_debug(len(raw_points), segments, crossings)
+
+
 class Orbit3DView(tk.Canvas):
     def __init__(self, master: tk.Misc) -> None:
         super().__init__(master, height=300, bg=COLORS["panel"], highlightthickness=0)
