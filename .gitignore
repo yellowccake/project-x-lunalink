@@ -14,3 +14,21 @@ Thumbs.db
 project_x_submission.zip
 ProjectX_LunaLink_Brief_v2.pdf
 outputs/
+
+# submission/private packaging
+LunaLink_Negar_Javid*/
+*.zip
+report/
+*.pdf
+outputs/
+__pycache__/
+*.pyc
+
+# submission/private packaging
+LunaLink_Negar_Javid*/
+*.zip
+report/
+*.pdf
+outputs/
+__pycache__/
+*.pyc
